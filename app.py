@@ -20,9 +20,7 @@ from phone_analyzer import analyze_phone
 
 ENGINE_VERSION = "0.1.0"
 
-RAPIDAPI_PROXY_SECRET = os.getenv(
-    "RAPIDAPI_PROXY_SECRET"
-)
+INTERNAL_SECRET = os.getenv("INTERNAL_SECRET")
 
 MAX_BULK_NUMBERS = 100
 
@@ -55,33 +53,22 @@ app = FastAPI(
 # Security
 # ---------------------------------------------------
 
-# ---------------------------------------------------
-# Security
-# ---------------------------------------------------
-
 def verify_gateway(
-    x_rapidapi_proxy_secret: str = Header(None)
+    x_internal_secret: str = Header(None)
 ):
 
-    if not RAPIDAPI_PROXY_SECRET:
+    if not INTERNAL_SECRET:
 
-        logger.error(
-            "RAPIDAPI_PROXY_SECRET is not configured"
-        )
+        logger.error("INTERNAL_SECRET is not configured")
 
         raise HTTPException(
             status_code=500,
             detail="Server configuration error"
         )
 
-    if (
-        x_rapidapi_proxy_secret
-        != RAPIDAPI_PROXY_SECRET
-    ):
+    if x_internal_secret != INTERNAL_SECRET:
 
-        logger.warning(
-            "Unauthorized request blocked"
-        )
+        logger.warning("Unauthorized request blocked")
 
         raise HTTPException(
             status_code=401,
@@ -132,24 +119,69 @@ def version():
 @app.post("/analyze")
 def analyze(
     req: PhoneRequest,
-    x_rapidapi_proxy_secret: str = Header(None)
+    x_internal_secret: str = Header(None)
 ):
 
-    verify_gateway(
-        x_rapidapi_proxy_secret
-    )
+    verify_gateway(x_internal_secret)
+
+    logger.info(f"Analyze request received")
+
+    result = analyze_phone(req.phone)
+
+    return {
+        "success": True,
+        "data": result
+    }
 
 # ---------------------------------------------------
 
 @app.post("/bulk-analyze")
 def bulk_analyze(
     req: BulkRequest,
-    x_rapidapi_proxy_secret: str = Header(None)
+    x_internal_secret: str = Header(None)
 ):
 
-    verify_gateway(
-        x_rapidapi_proxy_secret
-    )
+    verify_gateway(x_internal_secret)
+
+    count = len(req.numbers)
+
+    if count > MAX_BULK_NUMBERS:
+
+        raise HTTPException(
+            status_code=400,
+            detail=f"Maximum {MAX_BULK_NUMBERS} numbers allowed"
+        )
+
+    logger.info(f"Bulk analyze request: {count} numbers")
+
+    results = []
+
+    for number in req.numbers:
+
+        try:
+
+            results.append({
+                "success": True,
+                "data": analyze_phone(number)
+            })
+
+        except Exception as exc:
+
+            logger.exception(
+                f"Failed analyzing number: {number}"
+            )
+
+            results.append({
+                "success": False,
+                "phone": number,
+                "error": str(exc)
+            })
+
+    return {
+        "success": True,
+        "count": count,
+        "results": results
+    }
 
 # ---------------------------------------------------
 # Global Exception Handler
